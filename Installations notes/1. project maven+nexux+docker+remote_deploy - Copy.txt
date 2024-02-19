@@ -1,0 +1,204 @@
+
+stage-1
+git checkout
+-------------
+pipeline {
+    agent any
+
+    stages {
+        stage('git checkout') {
+            steps {
+                git 'https://github.com/arunkeerthi/newmavenproject.git'
+            }
+        }
+    }
+}
+
+stage-2
+git + Maven build
+-----------------
+pipeline {
+    agent any
+
+    stages {
+        stage('git checkout') {
+            steps {
+                git 'https://github.com/arunkeerthi/newmavenproject.git'
+            }
+        }
+        stage('mvn build') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+    }
+}
+stage-3
+-------
+-> connect to sonar server
+
+How to integrate Jenkins with sonar
+
+-> Manage Jenkins -> Manage Plugin -> Avaliable -> Sonar Qube Scaner Plugin -> install it
+
+Generate the token from sonar Qube Console
+-> My account -> Security -> Generate token
+   Token :  58a1837aac6559d41fbcf52b8ca53af6941fa69a
+
+Manage Jenkins -> Credentials -> global -> Add Credentials -> Secret Text (past the token number-> Any name in ID -> Any Name in Description 
+
+Manage Jnekins -> System configuration -> System -> Sonar Qube Server 
+                                                 -> Add SonarQube
+                                                 -> Name : Any name we can give here
+                                                 -> sever url : Copy the Sonar server (url http://18.191.227.121:9000/)
+                                                 -> server authentation token : Select the Credintial Id
+stage-4:(Nexus)
+--------
+
+Manage Pluging -> Avaliable -> Nexus artifact Uploader -> install
+
+-> Go to Pipline -> Click on Pipeline Syntax -> Select Nexus Version -> Protocol (HTTP) -> Nexus Server url -> Add(set up the nexus username and password)->
+-> Group Id(company name) -> Version (choose snap or release) -> Repository ( Nexus repo name ) -> artifact ID(project name)->Type(war/jar)->File(ex:target/01-maven-web-app.war)-> finally generate pipeline
+
+Stage-5:(build the image)
+--------
+  -> build the docker image
+    1. Install docker on jenkins server
+        $ yum install docker -y
+        $ systemctl start docker 
+    2. Add the jenkins user in the docker group
+        $ sudo usermod -a -G docker jenkins
+        $ systemctl restart jenkins
+    3. Mentioned docker image command in the jenkins pipline-> 
+        $ docker build -t arunkeerthi3101/imagname .            ----  docker build -t saranraj023/project2 .
+
+stage -6 (Login the docker hub and push the image to docker hub)
+--------
+     1. for login the docker hub. setup the docker hub password as a variable (with Credentials:Bind Credintials to Variables)
+        ->pipline syntax
+        -> Snippet Generator
+        -> with Credentials:Bind Credintials to Variables
+        -> Add
+        -> secret text
+        -> variable (eg: docker_hub)
+        -> add -> jenkins
+        -> secret text
+        -> secret (update the docker hub password)
+        -> ID (eg:docker_password_id)
+        -> Description (docker_password_id_dev_env)
+        -> Generate Pipline -> copy the logic
+     2. Create seprate stage for pushing the docker image to docker hub
+        -> past the logic 
+        -> along with next line mentiond the command like below
+           $ sh 'docker login -u arunkeerthi3101 -p docker_hub' 
+     3. Push the image to docker hub
+           $ sh 'docker push arunkeerthi3101/project2:${BUILD_NUMBER}'
+              
+stage-7 (deploy the docker container on the remote machine)
+-------
+      1. Adding the SSH agent in jenkin plugin
+         -> Manage Jenkins
+         -> Manage Plugin
+         -> Avaliable -> Search ("ssh-agent")  Plugin
+      2. Adding the Remote user (username and private key details ) for container deployment
+         -> pipline syntax
+         -> Snippet Generator
+         -> sshagent:SSH AGENT
+         -> Add -> jenkins
+         -> SSH Username with Private Key
+         -> ID (eg:dev_remote) 
+         -> Description (eg:dev_remote_project2)
+         -> username (ec2-user)
+         -> Enter directly -> add
+            Copy the remote meaching pem key
+         -> Generate Pipline -> Copy the Logic
+      3.Create the Stage for Container running
+         -> past the Logic on the stage (eg:sshagent(['dev_remote']))
+      4.Setup the environment variable for docker run command
+          environment{
+        dockerRun = 'docker run -d -P --name app-${BUILD_NUMBER} arunkeerthi3101/project2:${BUILD_NUMBER}'
+    }
+      5.SSH connectivity for remote user with docker container run
+        $ sh "ssh -o StrictHostKeyChecking=no ec2-user@172.31.39.83 ${dockerRun}"
+
+Note: In remote device we should add the username in the docker group
+Open new instance and install docker follow below steps
+$ sudo yum update -y
+$ sudo yum install docker -y
+$ sudo service docker start
+$ sudo usermod -aG docker ec2-user
+$ docker info
+#Restart the session
+$ exit
+Then press 'R' to restart the session (This is in Mobaxterm)
+# Display all running docker containers
+$ docker ps			Eg-- 0.0.0.0:32768->8080/tcp take 32768
+
+
+
+final stage syntax for deployment:
+---------------------------------
+            stage('deploy remote') {
+            steps {
+               sshagent(['dev_remote']) {
+                 sh "ssh -o StrictHostKeyChecking=no ec2-user@172.31.39.83 ${dockerRun}"
+}
+                
+            }
+        } 
+    }
+}
+
+Then dev ip address with port no (eg http://18.117.195.11:32768/maven-web-app/)
+_____________________|_________________________|______________________|_____________________|____________________|_________|________
+         
+jenkinsfile:
+----------
+
+pipeline {
+    agent any
+    environment{
+        dockerRun = 'docker run -d -P --name app-${BUILD_NUMBER} arunkeerthi3101/project2:${BUILD_NUMBER}'
+    }
+
+    stages {
+        stage('git checkout') {
+            steps {
+               git 'https://github.com/arunkeerthi/newmavenproject.git'
+            }
+        }
+        stage('mvn build') {
+            steps {
+               sh 'mvn clean package'
+            }
+        } 
+        stage('upload file') {
+            steps {
+               nexusArtifactUploader artifacts: [[artifactId: '01-maven-web-app', classifier: '', file: 'target/01-maven-web-app.war', type: 'war']], credentialsId: 'nexus-3', groupId: 'in.arunit', nexusUrl: '18.217.152.36:8081', nexusVersion: 'nexus3', protocol: 'http', repository: 'kumar-snapshot', version: '3.0-SNAPSHOT'
+            }
+        }  
+        stage('build the image') {
+            steps {
+               sh 'docker build -t arunkeerthi3101/project2:${BUILD_NUMBER} .'
+            }
+        } 
+        stage('Push docker image') {
+            steps {
+                withCredentials([string(credentialsId: 'docker_password_id', variable: 'docker_hub')]) {
+                  sh 'docker login -u arunkeerthi3101 -p ${docker_hub}' 
+}
+                  sh 'docker push arunkeerthi3101/project2:${BUILD_NUMBER}'
+            }
+        } 
+        stage('deploy remote') {
+            steps {
+               sshagent(['dev_remote']) {
+                 sh "ssh -o StrictHostKeyChecking=no ec2-user@35.77.98.55 ${dockerRun}"
+}
+                
+            }
+        } 
+    }
+}
+
+

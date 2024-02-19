@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: sbi-replica
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sbi
+  template:
+    metadata:
+      name: sbi-pod
+      labels:
+        app: sbi
+    spec:
+      containers:
+      - name: sbi-cont
+        image: httpd
+        ports:
+        - containerPort: 80
+
+
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sbi-daemon
+spec:
+  selector:
+    matchLabels:
+      app: sbi-daemon
+  template:
+    metadata:
+      name: sbi-pod-daemon
+      labels:
+        app: sbi-daemon
+    spec:
+      containers:
+      - name: sbi-cont-daemon
+        image: httpd
+        ports:
+        - containerPort: 80
+
+
+
+

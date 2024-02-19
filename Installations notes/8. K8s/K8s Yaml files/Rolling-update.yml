@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rolling-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: rolling
+  template:
+    metadata:
+      name: rolling-deployment-pod
+      labels:
+        app: rolling
+    spec:
+      containers:
+      - name: rolling-container
+        image: httpd
+        ports:
+        - containerPort: 80
